@@ -1,9 +1,8 @@
 #![feature(ip_constructors)]
 
-use std::net::{TcpListener, Ipv4Addr};
+use std::net::{TcpListener, TcpStream, Ipv4Addr};
 use std::io;
 use std::io::{BufRead, BufReader, Write, BufWriter};
-use std::thread;
 
 extern crate crossbeam;
 
@@ -20,42 +19,15 @@ fn main()
             Ok(client) =>
             {
                 println!("New client peer: {:?}", client.peer_addr());
-                let mut reader = BufReader::new(&client);
-                let mut writer = BufWriter::new(&client);
                 crossbeam::scope(|scope| // Threads spawned in this scope will be destroyed at the end of said scope
                 {
                     scope.spawn(||
                     {
-                        println!("Thread for receiving data from client: {:?}", client.peer_addr());
-                        for line in reader.lines()
-                        {
-                            match line
-                            {
-                                Ok(line) =>
-                                {
-                                    println!("\t{}", line);
-                                }
-                                Err(err) => println!("No data: {:?}", err)
-                            }
-                        }
-                        println!("We're out of lines from {:?}", client.peer_addr());
+                        client_recv(&client);
                     });
                     scope.spawn(||
                     {
-                        println!("Thread for sending data to client {:?}", client.peer_addr());
-                        let stdin = BufReader::new(io::stdin());
-                        for line in stdin.lines()
-                        {
-                            match line
-                            {
-                                Ok(line) =>
-                                {
-                                    write!(&mut writer, "{}\n", line);
-                                    writer.flush().unwrap();
-                                }
-                                Err(err) => println!("No data from stdin: {:?}", err)
-                            }
-                        }
+                        client_send(&client);
                     });
                 });
             }
@@ -65,4 +37,42 @@ fn main()
             }
         }
     }
+}
+
+fn client_recv(client: &TcpStream)
+{
+    println!("Thread for receiving data from client: {:?}", client.peer_addr());
+    let reader = BufReader::new(client);
+    for line in reader.lines()
+    {
+        match line
+        {
+            Ok(line) =>
+            {
+                println!("<\t{}", line);
+            }
+            Err(err) => println!("No data from client {:?}: {:?}", client.peer_addr(), err)
+        }
+    }
+    println!("We're out of lines from {:?}", client.peer_addr());
+}
+
+fn client_send(client: &TcpStream)
+{
+    println!("Thread for sending data to client: {:?}", client.peer_addr());
+    let mut writer = BufWriter::new(client);
+    let stdin = BufReader::new(io::stdin());
+    for line in stdin.lines()
+    {
+        match line
+        {
+            Ok(line) => // String
+            {
+                write!(&mut writer, "{}\n", line).unwrap();
+                writer.flush().unwrap();
+            }
+            Err(err) => println!("No data from stdin: {:?}", err)
+        }
+    }
+    println!("We're out of lines from stdin");
 }
