@@ -4,3 +4,4 @@ version = "0.1.0"
 authors = ["Mikaela RJ Szekely <qyriad@gmail.com>"]
 
 [dependencies]
+crossbeam = "0.3.1"
