@@ -62,9 +62,9 @@ fn client_recv(client: &TcpStream, tx: mpsc::Sender<Operation>)
         {
             Ok(line) =>
             {
-                let ch = line.chars().nth(0).expect("Unable to index");
-                println!("Got char {}", ch as u8);
-                let op: Operation = unsafe { std::mem::transmute(ch as u8) };
+                let i = line.as_bytes()[0];
+                println!("Got char {}", i);
+                let op: Operation = unsafe { std::mem::transmute(i) };
                 println!("Got op {:?}", op);
                 if let Operation::Exit = op
                 {
