@@ -6,6 +6,14 @@ use std::sync::mpsc;
 
 extern crate crossbeam;
 
+#[derive(PartialEq, Debug)]
+#[repr(u8)]
+enum Operation
+{
+    Exit = 0,
+    List = 1,
+}
+
 fn main()
 {
 	println!("Starting server");
@@ -21,7 +29,7 @@ fn main()
                 println!("New client peer: {:?}", client.peer_addr());
                 crossbeam::scope(|scope| // Threads spawned in this scope will be destroyed at the end of said scope
                 {
-                    let (tx, rx): (mpsc::Sender<bool>, mpsc::Receiver<bool>) = mpsc::channel();
+                    let (tx, rx): (mpsc::Sender<Operation>, mpsc::Receiver<Operation>) = mpsc::channel();
                     let recv = scope.spawn(||
                     {
                         client_recv(&client, tx);
@@ -44,7 +52,7 @@ fn main()
     }
 }
 
-fn client_recv(client: &TcpStream, tx: mpsc::Sender<bool>)
+fn client_recv(client: &TcpStream, tx: mpsc::Sender<Operation>)
 {
     println!("Thread for receiving data from client: {:?}", client.peer_addr());
     let reader = BufReader::new(client);
@@ -54,56 +62,71 @@ fn client_recv(client: &TcpStream, tx: mpsc::Sender<bool>)
         {
             Ok(line) =>
             {
+                let ch = line.chars().nth(0).expect("Unable to index");
+                println!("Got char {}", ch as u8);
+                let op: Operation = unsafe { std::mem::transmute(ch as u8) };
+                println!("Got op {:?}", op);
+                if let Operation::Exit = op
+                {
+                    tx.send(op).unwrap();
+                    return;
+                }
+                // Must not be exit
+
+                tx.send(op).unwrap();
+
                 println!("<\t{}", line);
             }
             Err(err) => println!("No data from client {:?}: {:?}", client.peer_addr(), err)
         }
     }
     println!("We're out of lines from client");
-    tx.send(true).unwrap();
+    let _ = tx.send(Operation::Exit);
 }
 
-fn client_send(client: &TcpStream, rx: mpsc::Receiver<bool>)
+fn client_send(client: &TcpStream, rx: mpsc::Receiver<Operation>)
 {
     println!("Thread for sending data to client: {:?}", client.peer_addr());
     let mut writer = BufWriter::new(client);
-    let stdin = BufReader::new(io::stdin());
-    for line in stdin.lines()
+    //let stdin = BufReader::new(io::stdin());
+    //for line in stdin.lines()
+    loop
     {
-        if rx.try_recv() == Ok(true)
+        let op = rx.try_recv();
+        match op
         {
-            return;
+            Ok(op) =>
+            {
+                match op
+                {
+                    Operation::Exit => { return; },
+                    Operation::List =>
+                    {
+                        let res = write!(&mut writer, "file_listing_here");
+                        if let Err(_) = res { return; }
+                        let res = writer.flush();
+                        if let Err(_) = res { return; }
+                    }
+                }
+            },
+            Err(_) => ()
         }
-        match line
+
+        /*match line
         {
             Ok(line) => // String
             {
                 let res = write!(&mut writer, "{}\n", line);
-                match res
-                {
-                    Err(err) => 
-                    {
-                        return;
-                    },
-                    _ => ()
-                }
+                if let Err(error_value) = res { return; }
                 let res = writer.flush();
-                match res
-                {
-                    Err(err) => 
-                    {
-                        eprintln!("!Exiting send, err {}", err);
-                        return;
-                    },
-                    _ => eprintln!("!Success flushing")
-                }
+                if let Err(_) = res { return; }
             }
-            Err(err) => println!("No data from stdin: {:?}", err)
-        }
-        if rx.try_recv() == Ok(true)
+            Err(err) => { println!("No data from stdin: {:?}", err); return; }
+        }*/
+        /*if rx.try_recv() == Ok(Operation::Exit)
         {
             return;
-        }
+        }*/
     }
-    println!("We're out of lines from stdin");
+    //println!("We're out of lines from stdin");
 }
