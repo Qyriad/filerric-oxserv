@@ -1,7 +1,6 @@
 #![feature(ip_constructors)]
 
 use std::net::{TcpListener, TcpStream, Ipv4Addr};
-use std::io;
 use std::io::{BufRead, BufReader, Write, BufWriter};
 use std::sync::mpsc;
 
@@ -11,13 +10,13 @@ fn main()
 {
 	println!("Starting server");
 
-    let control_soc = TcpListener::bind((Ipv4Addr::unspecified(), 1313)).unwrap();
+    let control_soc = TcpListener::bind((Ipv4Addr::unspecified(), 1313)).expect("Failed to bind to address");
 
     for client_stream in control_soc.incoming()
     {
         match client_stream
         {
-            Ok(client) =>
+            Ok(client) => // type: TcpListener
             {
                 println!("New client peer: {:?}", client.peer_addr());
                 crossbeam::scope(|scope| // Threads spawned in this scope will be destroyed at the end of said scope
