@@ -41,6 +41,7 @@ fn main()
                     });
 
                     recv.join();
+                    // recv sent Exit operation, so send should be joining soon
                     send.join();
                 });
             }
@@ -71,7 +72,7 @@ fn client_recv(client: &TcpStream, tx: mpsc::Sender<Operation>)
                     tx.send(op).unwrap();
                     return;
                 }
-                // Must not be exit
+                // Must not be exit if we're here
 
                 tx.send(op).unwrap();
 
@@ -88,8 +89,6 @@ fn client_send(client: &TcpStream, rx: mpsc::Receiver<Operation>)
 {
     println!("Thread for sending data to client: {:?}", client.peer_addr());
     let mut writer = BufWriter::new(client);
-    //let stdin = BufReader::new(io::stdin());
-    //for line in stdin.lines()
     loop
     {
         let op = rx.try_recv();
@@ -111,22 +110,5 @@ fn client_send(client: &TcpStream, rx: mpsc::Receiver<Operation>)
             },
             Err(_) => ()
         }
-
-        /*match line
-        {
-            Ok(line) => // String
-            {
-                let res = write!(&mut writer, "{}\n", line);
-                if let Err(error_value) = res { return; }
-                let res = writer.flush();
-                if let Err(_) = res { return; }
-            }
-            Err(err) => { println!("No data from stdin: {:?}", err); return; }
-        }*/
-        /*if rx.try_recv() == Ok(Operation::Exit)
-        {
-            return;
-        }*/
     }
-    //println!("We're out of lines from stdin");
 }
