@@ -6,13 +6,9 @@ use std::sync::mpsc;
 
 extern crate crossbeam;
 
-#[derive(PartialEq, Debug)]
-#[repr(u8)]
-enum Operation
-{
-    Exit = 0,
-    List = 1,
-}
+mod operation; // Look for operation.rs
+
+use operation::Operation;
 
 fn main()
 {
@@ -57,15 +53,17 @@ fn client_recv(client: &TcpStream, tx: mpsc::Sender<Operation>)
 {
     println!("Thread for receiving data from client: {:?}", client.peer_addr());
     let reader = BufReader::new(client);
-    for line in reader.lines()
+    for bytes in reader.split(b'\0')
     {
-        match line
+        match bytes
         {
-            Ok(line) =>
+            Ok(bytes) =>
             {
-                let i = line.as_bytes()[0];
-                println!("Got char {}", i);
-                let op: Operation = unsafe { std::mem::transmute(i) };
+                let i = bytes[0];
+                println!("Got byte {}", i);
+                let op = Operation::from(i, if bytes.len() > 1 { Some(bytes[1]) } else { None });
+                if let Err(err) = op { println!("{:?}", err); continue; }
+                let op = op.expect("This shouldn't be possible");
                 println!("Got op {:?}", op);
                 if let Operation::Exit = op
                 {
@@ -76,13 +74,11 @@ fn client_recv(client: &TcpStream, tx: mpsc::Sender<Operation>)
 
                 tx.send(op).unwrap();
 
-                println!("<\t{}", line);
-            }
-            Err(err) => println!("No data from client {:?}: {:?}", client.peer_addr(), err)
+                println!("<\t{}", String::from_utf8(bytes).expect("Invalid UTF-8"));
+            },
+            Err(err) => println!("Error splitting string: {:?}", err)
         }
     }
-    println!("We're out of lines from client");
-    let _ = tx.send(Operation::Exit);
 }
 
 fn client_send(client: &TcpStream, rx: mpsc::Receiver<Operation>)
@@ -101,7 +97,30 @@ fn client_send(client: &TcpStream, rx: mpsc::Receiver<Operation>)
                     Operation::Exit => { return; },
                     Operation::List =>
                     {
-                        let res = write!(&mut writer, "file_listing_here");
+                        let cur_dir = std::env::current_dir().expect("Unable to get current directory");
+                        let entries = std::fs::read_dir(cur_dir).expect("Error iterating over directory entires");
+                        let mut result = String::new();
+                        for item in entries
+                        {
+                            match item
+                            {
+                                Ok(item) =>
+                                {
+                                    result.push_str(&item.file_name().into_string().unwrap());
+                                    //result.push_str(&String::from_utf8(vec![0x1F]).unwrap());
+                                    result.push('\x1F'); // 0x1F: US, Unit Separator
+                                }
+                                Err(err) => println!("Error iterating over directory entries: {}", err)
+                            }
+                        }
+                        let res = write!(&mut writer, "file_listing_here\x00{}\n", result);
+                        if let Err(_) = res { return; }
+                        let res = writer.flush();
+                        if let Err(_) = res { return; }
+                    },
+                    Operation::Get(selection) =>
+                    {
+                        let res = write!(&mut writer, "get_{}\x00\n", selection);
                         if let Err(_) = res { return; }
                         let res = writer.flush();
                         if let Err(_) = res { return; }
