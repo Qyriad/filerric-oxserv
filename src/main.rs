@@ -5,6 +5,9 @@ use std::io::{BufRead, BufReader, Write, BufWriter};
 use std::sync::mpsc;
 
 extern crate crossbeam;
+extern crate ascii_utils;
+
+use ascii_utils::table as ascii;
 
 mod operation; // Look for operation.rs
 
@@ -107,8 +110,8 @@ fn client_send(client: &TcpStream, rx: mpsc::Receiver<Operation>)
                                 Ok(item) =>
                                 {
                                     result.push_str(&item.file_name().into_string().unwrap());
-                                    //result.push_str(&String::from_utf8(vec![0x1F]).unwrap());
-                                    result.push('\x1F'); // 0x1F: US, Unit Separator
+                                    //result.push('\x1F'); // 0x1F: US, Unit Separator
+                                    result.push(ascii::US_AS_CHAR);
                                 }
                                 Err(err) => println!("Error iterating over directory entries: {}", err)
                             }

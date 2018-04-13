@@ -5,3 +5,4 @@ authors = ["Mikaela RJ Szekely <qyriad@gmail.com>"]
 
 [dependencies]
 crossbeam = "0.3.1"
+ascii_utils = "0.9.3"
