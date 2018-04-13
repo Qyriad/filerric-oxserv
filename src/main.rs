@@ -61,7 +61,7 @@ fn client_recv(client: &TcpStream, tx: mpsc::Sender<Operation>)
             {
                 let i = bytes[0];
                 println!("Got byte {}", i);
-                let op = Operation::from(i, if bytes.len() > 1 { Some(bytes[1]) } else { None });
+                let op = Operation::from(i, bytes.get(1).cloned());
                 if let Err(err) = op { println!("{:?}", err); continue; }
                 let op = op.expect("This shouldn't be possible");
                 println!("Got op {:?}", op);
