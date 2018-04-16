@@ -28,7 +28,9 @@ fn main()
                 println!("New client peer: {:?}", client.peer_addr());
                 crossbeam::scope(|scope| // Threads spawned in this scope will be destroyed at the end of said scope
                 {
+                    // Let client_recv send information to client_send
                     let (tx, rx): (mpsc::Sender<Operation>, mpsc::Receiver<Operation>) = mpsc::channel();
+
                     let recv = scope.spawn(||
                     {
                         client_recv(&client, tx);
@@ -36,11 +38,11 @@ fn main()
 
                     let send = scope.spawn(||
                     {
-                        client_send(&client, rx);
+                        client_send(&client, rx); // effectively a slave to client_recv thread
                     });
 
                     recv.join();
-                    // recv sent Exit operation, so send should be joining soon
+                    // recv sent Exit operation, so send should be joining soon™
                     send.join();
                 });
             }
@@ -56,26 +58,23 @@ fn client_recv(client: &TcpStream, tx: mpsc::Sender<Operation>)
 {
     println!("Thread for receiving data from client: {:?}", client.peer_addr());
     let reader = BufReader::new(client);
-    for bytes in reader.split(b'\0')
+    for bytes in reader.split(b'\0') // Delimited by null
     {
         match bytes
         {
             Ok(bytes) =>
             {
-                let i = bytes[0];
-                println!("Got byte {}", i);
-                let op = Operation::from(i, bytes.get(1).cloned());
-                if let Err(err) = op { println!("{:?}", err); continue; }
+                if bytes.len() == 0
+                {
+                    println!("Received empty transmission");
+                    continue;
+                }
+                let op = Operation::from(bytes[0], bytes.get(1).cloned()); // Cloned because Rust is picky about u8 vs &u8
+                if let Err(err) = op { println!("{:?}", err); continue; } // FIXME: this is bleh
                 let op = op.expect("This shouldn't be possible");
                 println!("Got op {:?}", op);
-                if let Operation::Exit = op
-                {
-                    tx.send(op).unwrap();
-                    return;
-                }
-                // Must not be exit if we're here
-
-                tx.send(op).unwrap();
+                if let Operation::Exit = op { tx.send(op).expect("Failed to send operation to slave thread"); return; }
+                tx.send(op).expect("Failed to send operation to slave thread");
 
                 println!("<\t{}", String::from_utf8(bytes).expect("Invalid UTF-8"));
             },
@@ -111,7 +110,7 @@ fn client_send(client: &TcpStream, rx: mpsc::Receiver<Operation>)
                                 {
                                     result.push_str(&item.file_name().into_string().unwrap());
                                     //result.push('\x1F'); // 0x1F: US, Unit Separator
-                                    result.push(ascii::US_AS_CHAR);
+                                    result.push(ascii::US.into());
                                 }
                                 Err(err) => println!("Error iterating over directory entries: {}", err)
                             }
