@@ -179,11 +179,25 @@ fn client_send(client: &TcpStream, rx: mpsc::Receiver<Operation>)
 
 fn udp_server(tx: mpsc::Sender<SocketAddr>, exit_rx: mpsc::Receiver<()>, bind_addr: IpAddr)
 {
-	let mut soc = UdpSocket::bind((bind_addr, 0)).expect("Failed to bind UDP server");
+	let soc = UdpSocket::bind((bind_addr, 0)).expect("Failed to bind UDP server");
 	let addr = soc.local_addr().expect("Failed to get UDP address");
 	println!("Bound UDP server to {:?}", addr);
 
 	tx.send(addr).expect("Failed to send UDP address");
+
+	// 1 megabit
+	let mut buffer: Vec<u8> = Vec::new();
+	let (byte_count, addr) = soc.recv_from(&mut buffer).expect(format!("Failed to receive data to UDP server").as_str());
+	println!("Received {} bytes from UDP {:?}", byte_count, addr);
+
+	soc.connect(addr).expect(format!("Failed to connect to {:?}", addr).as_str());
+
+	buffer.clear();
+	buffer.push(b'A');
+	buffer.push(b'C');
+	buffer.push(b'K');
+
+	soc.send(&buffer).expect("Error sending data to client");
 
 	if exit_rx.try_recv().is_ok() { return; }
 }
