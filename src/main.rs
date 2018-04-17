@@ -1,8 +1,10 @@
 #![feature(ip_constructors)]
 
-use std::net::{TcpListener, TcpStream, Ipv4Addr};
+use std::net::{TcpListener, TcpStream, IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
 use std::io::{BufRead, BufReader, Write, BufWriter};
 use std::sync::mpsc;
+use std::fs::DirEntry;
+use std::thread;
 
 extern crate crossbeam;
 extern crate ascii_utils;
@@ -87,6 +89,9 @@ fn client_send(client: &TcpStream, rx: mpsc::Receiver<Operation>)
 {
     println!("Thread for sending data to client: {:?}", client.peer_addr());
     let mut writer = BufWriter::new(client);
+	let cur_dir = std::env::current_dir().expect("Unable to get current directory");
+	let mut entries = std::fs::read_dir(&cur_dir).expect("Error iterating over directory entries");
+
     loop
     {
         let op = rx.try_recv();
@@ -99,8 +104,7 @@ fn client_send(client: &TcpStream, rx: mpsc::Receiver<Operation>)
                     Operation::Exit => { return; },
                     Operation::List =>
                     {
-                        let cur_dir = std::env::current_dir().expect("Unable to get current directory");
-                        let entries = std::fs::read_dir(cur_dir).expect("Error iterating over directory entires");
+                        entries = std::fs::read_dir(&cur_dir).expect("Error iterating over directory entries");
                         let mut result = String::new();
                         for item in entries
                         {
@@ -109,8 +113,7 @@ fn client_send(client: &TcpStream, rx: mpsc::Receiver<Operation>)
                                 Ok(item) =>
                                 {
                                     result.push_str(&item.file_name().into_string().unwrap());
-                                    //result.push('\x1F'); // 0x1F: US, Unit Separator
-                                    result.push(ascii::US.into());
+                                    result.push(ascii::US.into()); // 0x1F, Unit Separator
                                 }
                                 Err(err) => println!("Error iterating over directory entries: {}", err)
                             }
@@ -126,10 +129,35 @@ fn client_send(client: &TcpStream, rx: mpsc::Receiver<Operation>)
                         if let Err(_) = res { return; }
                         let res = writer.flush();
                         if let Err(_) = res { return; }
+
+						// entries.nth(): Option<io::Result<DirEntry>>
+						let item: DirEntry = entries.nth(selection as usize)
+							.expect("Requested non-existent file")
+							.expect("IO Error");
+
+						let (udp_tx, udp_rx): (mpsc::Sender<SocketAddr>, mpsc::Receiver<SocketAddr>) = mpsc::channel();
+						let (exit_tx, exit_rx): (mpsc::Sender<()>, mpsc::Receiver<()>) = mpsc::channel();
+
+						let loc_addr = client.local_addr().expect("Unable to get TCP local address").ip();
+						thread::spawn(move || udp_server(udp_tx, loc_addr));
+
+						let udp_addr = udp_rx.recv().expect("Unable to get UDP server's address");
+						println!("UDP Server is listening on port {}", udp_addr.port());
+
+						let res = write!(&mut writer, "file_{}port_{}\x00", item.file_name().into_string().unwrap(), udp_addr.port());
+						if let Err(_) = res { return; }
+						let res = writer.flush();
+						if let Err(_) = res { return; }
                     }
                 }
             },
             Err(_) => ()
         }
     }
+}
+
+fn udp_server(tx: mpsc::Sender<SocketAddr>, bind_addr: IpAddr)
+{
+	let mut soc = UdpSocket::bind((bind_addr, 0)).expect("Failed to bind UDP server");
+	let addr = soc.local_addr().expect("Failed to get UDP address");
 }
