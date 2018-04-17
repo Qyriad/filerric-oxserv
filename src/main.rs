@@ -152,7 +152,7 @@ fn client_send(client: &TcpStream, rx: mpsc::Receiver<Operation>)
 
 						let mut entries = std::fs::read_dir(&cur_dir).expect("Error iterating over directory entries");
 						// entries.nth(): Option<io::Result<DirEntry>>
-						let item: DirEntry = entries.nth(selection as usize)
+						let item: DirEntry = entries.nth((selection - 1).into())
 							.expect("Requested non-existent file")
 							.expect("IO Error");
 
