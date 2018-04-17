@@ -90,7 +90,6 @@ fn client_send(client: &TcpStream, rx: mpsc::Receiver<Operation>)
     println!("Thread for sending data to client: {:?}", client.peer_addr());
     let mut writer = BufWriter::new(client);
 	let cur_dir = std::env::current_dir().expect("Unable to get current directory");
-	let mut entries = std::fs::read_dir(&cur_dir).expect("Error iterating over directory entries");
 
     loop
     {
@@ -104,7 +103,28 @@ fn client_send(client: &TcpStream, rx: mpsc::Receiver<Operation>)
                     Operation::Exit => { return; },
                     Operation::List =>
                     {
-                        entries = std::fs::read_dir(&cur_dir).expect("Error iterating over directory entries");
+                        let mut entries = std::fs::read_dir(&cur_dir)
+							.expect("Error iterating over directory entries")
+							.filter(|entry| //: &Result<DirEntry, io::Error>
+									{
+										match entry
+										{
+											&Ok(ref entry) => match entry.file_type()
+											{
+												Ok(ft) => ft.is_file(),
+												Err(err) =>
+												{
+													println!("IO error: {}", err);
+													false
+												}
+											}
+											&Err(ref err) =>
+											{
+												println!("IO error: {}", err);
+												false
+											}
+										}
+									});
                         let mut result = String::new();
                         for item in entries
                         {
@@ -115,7 +135,7 @@ fn client_send(client: &TcpStream, rx: mpsc::Receiver<Operation>)
                                     result.push_str(&item.file_name().into_string().unwrap());
                                     result.push(ascii::US.into()); // 0x1F, Unit Separator
                                 }
-                                Err(err) => println!("Error iterating over directory entries: {}", err)
+                                Err(err) => println!("IO Error: {}", err)
                             }
                         }
                         let res = write!(&mut writer, "file_listing_here\x00{}\n", result);
@@ -130,6 +150,7 @@ fn client_send(client: &TcpStream, rx: mpsc::Receiver<Operation>)
                         let res = writer.flush();
                         if let Err(_) = res { return; }
 
+						let mut entries = std::fs::read_dir(&cur_dir).expect("Error iterating over directory entries");
 						// entries.nth(): Option<io::Result<DirEntry>>
 						let item: DirEntry = entries.nth(selection as usize)
 							.expect("Requested non-existent file")
@@ -139,15 +160,15 @@ fn client_send(client: &TcpStream, rx: mpsc::Receiver<Operation>)
 						let (exit_tx, exit_rx): (mpsc::Sender<()>, mpsc::Receiver<()>) = mpsc::channel();
 
 						let loc_addr = client.local_addr().expect("Unable to get TCP local address").ip();
-						thread::spawn(move || udp_server(udp_tx, loc_addr));
+						thread::spawn(move || udp_server(udp_tx, exit_rx, loc_addr));
 
 						let udp_addr = udp_rx.recv().expect("Unable to get UDP server's address");
 						println!("UDP Server is listening on port {}", udp_addr.port());
 
 						let res = write!(&mut writer, "file_{}port_{}\x00", item.file_name().into_string().unwrap(), udp_addr.port());
-						if let Err(_) = res { return; }
+						if let Err(_) = res { exit_tx.send(()).unwrap(); return; }
 						let res = writer.flush();
-						if let Err(_) = res { return; }
+						if let Err(_) = res { exit_tx.send(()).unwrap(); return; }
                     }
                 }
             },
@@ -156,8 +177,13 @@ fn client_send(client: &TcpStream, rx: mpsc::Receiver<Operation>)
     }
 }
 
-fn udp_server(tx: mpsc::Sender<SocketAddr>, bind_addr: IpAddr)
+fn udp_server(tx: mpsc::Sender<SocketAddr>, exit_rx: mpsc::Receiver<()>, bind_addr: IpAddr)
 {
 	let mut soc = UdpSocket::bind((bind_addr, 0)).expect("Failed to bind UDP server");
 	let addr = soc.local_addr().expect("Failed to get UDP address");
+	println!("Bound UDP server to {:?}", addr);
+
+	tx.send(addr).expect("Failed to send UDP address");
+
+	if exit_rx.try_recv().is_ok() { return; }
 }
