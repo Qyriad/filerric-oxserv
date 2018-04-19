@@ -15,11 +15,17 @@ mod operation; // Look for operation.rs
 
 use operation::Operation;
 
+macro_rules! crash
+{
+	($e:expr) => { format!("{}; {}:{}", $e, line!(), column!()).as_str() };
+	($fmt:expr, $($arg:tt)+) => { format!(concat!($fmt, "; {}:{}"), $($arg)+, line!(), column!()).as_str() }
+}
+
 fn main()
 {
 	println!("Starting server");
 
-    let control_soc = TcpListener::bind((Ipv4Addr::unspecified(), 1313)).expect("Failed to bind to address");
+    let control_soc = TcpListener::bind((Ipv4Addr::unspecified(), 1313)).expect(crash!("Failed to bind to address"));
 
     for client_stream in control_soc.incoming()
     {
@@ -73,12 +79,12 @@ fn client_recv(client: &TcpStream, tx: mpsc::Sender<Operation>)
                 }
                 let op = Operation::from(bytes[0], bytes.get(1).cloned()); // Cloned because Rust is picky about u8 vs &u8
                 if let Err(err) = op { println!("{:?}", err); continue; } // FIXME: this is bleh
-                let op = op.expect("This shouldn't be possible");
+                let op = op.unwrap_or_else(|_| unreachable!());
                 println!("Got op {:?}", op);
-                if let Operation::Exit = op { tx.send(op).expect("Failed to send operation to slave thread"); return; }
-                tx.send(op).expect("Failed to send operation to slave thread");
+                if let Operation::Exit = op { tx.send(op).expect(crash!("Failed to send operation to slave thread")); return; }
+                tx.send(op).expect(crash!("Failed to send operation to slave thread"));
 
-                println!("<\t{}", String::from_utf8(bytes).expect("Invalid UTF-8"));
+                println!("<\t{}", String::from_utf8(bytes).expect(crash!("Invalid UTF-8")));
             },
             Err(err) => println!("Error splitting string: {:?}", err)
         }
@@ -89,7 +95,7 @@ fn client_send(client: &TcpStream, rx: mpsc::Receiver<Operation>)
 {
     println!("Thread for sending data to client: {:?}", client.peer_addr());
     let mut writer = BufWriter::new(client);
-	let cur_dir = std::env::current_dir().expect("Unable to get current directory");
+	let cur_dir = std::env::current_dir().expect(crash!("Unable to get current directory"));
 
     loop
     {
@@ -104,7 +110,7 @@ fn client_send(client: &TcpStream, rx: mpsc::Receiver<Operation>)
                     Operation::List =>
                     {
                         let mut entries = std::fs::read_dir(&cur_dir)
-							.expect("Error iterating over directory entries")
+							.expect(crash!("Error iterating over directory entries"))
 							.filter(|entry| //: &Result<DirEntry, io::Error>
 									{
 										match entry
@@ -150,19 +156,19 @@ fn client_send(client: &TcpStream, rx: mpsc::Receiver<Operation>)
                         let res = writer.flush();
                         if let Err(_) = res { return; }
 
-						let mut entries = std::fs::read_dir(&cur_dir).expect("Error iterating over directory entries");
+						let mut entries = std::fs::read_dir(&cur_dir).expect(crash!("Error iterating over directory entries"));
 						// entries.nth(): Option<io::Result<DirEntry>>
-						let item: DirEntry = entries.nth((selection - 1).into())
-							.expect("Requested non-existent file")
-							.expect("IO Error");
+						let item: DirEntry = entries.nth(selection as usize)
+							.expect(crash!("Requested non-existent file"))
+							.expect(crash!("IO Error"));
 
 						let (udp_tx, udp_rx): (mpsc::Sender<SocketAddr>, mpsc::Receiver<SocketAddr>) = mpsc::channel();
 						let (exit_tx, exit_rx): (mpsc::Sender<()>, mpsc::Receiver<()>) = mpsc::channel();
 
-						let loc_addr = client.local_addr().expect("Unable to get TCP local address").ip();
+						let loc_addr = client.local_addr().expect(crash!("Unable to get TCP local address")).ip();
 						thread::spawn(move || udp_server(udp_tx, exit_rx, loc_addr));
 
-						let udp_addr = udp_rx.recv().expect("Unable to get UDP server's address");
+						let udp_addr = udp_rx.recv().expect(crash!("Unable to get UDP server's address"));
 						println!("UDP Server is listening on port {}", udp_addr.port());
 
 						let res = write!(&mut writer, "file_{}port_{}\x00", item.file_name().into_string().unwrap(), udp_addr.port());
@@ -179,11 +185,11 @@ fn client_send(client: &TcpStream, rx: mpsc::Receiver<Operation>)
 
 fn udp_server(tx: mpsc::Sender<SocketAddr>, exit_rx: mpsc::Receiver<()>, bind_addr: IpAddr)
 {
-	let soc = UdpSocket::bind((bind_addr, 0)).expect("Failed to bind UDP server");
-	let addr = soc.local_addr().expect("Failed to get UDP address");
+	let soc = UdpSocket::bind((bind_addr, 0)).expect(crash!("Failed to bind UDP server"));
+	let addr = soc.local_addr().expect(crash!("Failed to get UDP address"));
 	println!("Bound UDP server to {:?}", addr);
 
-	tx.send(addr).expect("Failed to send UDP address");
+	tx.send(addr).expect(crash!("Failed to send UDP address"));
 
 	// 1 megabit
 	let mut buffer: Vec<u8> = Vec::new();
