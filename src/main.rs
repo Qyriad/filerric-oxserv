@@ -86,9 +86,10 @@ fn client_recv(client: &TcpStream, tx: mpsc::Sender<Operation>)
 
                 println!("<\t{}", String::from_utf8(bytes).expect(crash!("Invalid UTF-8")));
             },
-            Err(err) => println!("Error splitting string: {:?}", err)
+            Err(err) => { println!("Error splitting string: {:?}", err); return; }
         }
     }
+	tx.send(Operation::Exit).expect(crash!("Failed to send exit operation to slave thread"));
 }
 
 fn client_send(client: &TcpStream, rx: mpsc::Receiver<Operation>)
