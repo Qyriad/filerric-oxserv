@@ -1,9 +1,10 @@
 #![feature(ip_constructors)]
 
 use std::net::{TcpListener, TcpStream, IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
-use std::io::{BufRead, BufReader, Write, BufWriter};
+use std::io::{BufRead, BufReader, Read, Write, BufWriter};
 use std::sync::mpsc;
-use std::fs::DirEntry;
+use std::fs::{DirEntry, File};
+use std::path::PathBuf;
 use std::thread;
 
 extern crate crossbeam;
@@ -157,7 +158,27 @@ fn client_send(client: &TcpStream, rx: mpsc::Receiver<Operation>)
                         let res = writer.flush();
                         if let Err(_) = res { return; }
 
-						let mut entries = std::fs::read_dir(&cur_dir).expect(crash!("Error iterating over directory entries"));
+						let mut entries = std::fs::read_dir(&cur_dir).expect(crash!("Error iterating over directory entries"))
+							.filter(|entry| //: &Result<DirEntry, io::Error>
+									{
+										match entry
+										{
+											&Ok(ref entry) => match entry.file_type()
+											{
+												Ok(ft) => ft.is_file(),
+												Err(err) =>
+												{
+													println!("IO error: {}", err);
+													false
+												}
+											}
+											&Err(ref err) =>
+											{
+												println!("IO error: {}", err);
+												false
+											}
+										}
+									});
 						// entries.nth(): Option<io::Result<DirEntry>>
 						let item: DirEntry = entries.nth(selection as usize)
 							.expect(crash!("Requested non-existent file"))
@@ -167,7 +188,8 @@ fn client_send(client: &TcpStream, rx: mpsc::Receiver<Operation>)
 						let (exit_tx, exit_rx): (mpsc::Sender<()>, mpsc::Receiver<()>) = mpsc::channel();
 
 						let loc_addr = client.local_addr().expect(crash!("Unable to get TCP local address")).ip();
-						thread::spawn(move || udp_server(udp_tx, exit_rx, loc_addr));
+						let path = item.path();
+						thread::spawn(move || udp_server(udp_tx, exit_rx, loc_addr, path));
 
 						let udp_addr = udp_rx.recv().expect(crash!("Unable to get UDP server's address"));
 						println!("UDP Server is listening on port {}", udp_addr.port());
@@ -184,7 +206,7 @@ fn client_send(client: &TcpStream, rx: mpsc::Receiver<Operation>)
     }
 }
 
-fn udp_server(tx: mpsc::Sender<SocketAddr>, exit_rx: mpsc::Receiver<()>, bind_addr: IpAddr)
+fn udp_server(tx: mpsc::Sender<SocketAddr>, exit_rx: mpsc::Receiver<()>, bind_addr: IpAddr, path: PathBuf)
 {
 	let soc = UdpSocket::bind((bind_addr, 0)).expect(crash!("Failed to bind UDP server"));
 	let addr = soc.local_addr().expect(crash!("Failed to get UDP address"));
@@ -204,7 +226,13 @@ fn udp_server(tx: mpsc::Sender<SocketAddr>, exit_rx: mpsc::Receiver<()>, bind_ad
 	buffer.push(b'C');
 	buffer.push(b'K');
 
-	soc.send(&buffer).expect("Error sending data to client");
+	soc.send(&buffer).expect(crash!("Error sending data to client"));
+
+	let mut f = File::open(path).expect(crash!("Error opening file"));
+	let mut filebuf = Vec::new();
+	f.read_to_end(&mut filebuf).expect(crash!("Error reading file"));
+
+	soc.send(&filebuf).expect(crash!("Error sending file to client"));
 
 	if exit_rx.try_recv().is_ok() { return; }
 }
