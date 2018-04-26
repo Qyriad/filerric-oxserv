@@ -151,7 +151,7 @@ fn client_send(client: &TcpStream, rx: mpsc::Receiver<Operation>)
                                 Err(err) => println!("IO Error: {}", err)
                             }
                         }
-                        let res = write!(&mut writer, "file_listing_here\x00{}\n", result);
+                        let res = write!(&mut writer, "file_listing\x00{}\n", result);
                         if let Err(_) = res { return; }
                         let res = writer.flush();
                         if let Err(_) = res { return; }
